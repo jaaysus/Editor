@@ -407,6 +407,8 @@ function App() {
                   src={image}
                   alt="Uploaded"
                   className="main-image"
+                  draggable={false}
+                  onDragStart={(e) => e.preventDefault()}
                   onLoad={handleImageLoad}
                   style={{
                     width: stageSize.width,
@@ -417,7 +419,13 @@ function App() {
                 {cavities.map((cavity, index) => (
                   <div
                     key={index}
-                    className={isRemoveMode ? 'cavity remove-mode' : 'cavity'}
+                    className={[
+                      'cavity',
+                      isRemoveMode ? 'remove-mode' : '',
+                      !isRemoveMode && selectedCavityIndex === index ? 'is-selected' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
                     onMouseDown={(e) => {
                       e.stopPropagation()
                       setSelectedCavityIndex(index)
