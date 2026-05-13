@@ -41,6 +41,7 @@ body {
   width: min(100%, 960px);
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
   margin-bottom: 20px;
 }
@@ -57,6 +58,30 @@ body {
 
 .toolbar input {
   padding: 10px 12px;
+}
+
+.toolbar-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.04);
+}
+
+.toolbar-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #555555;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.toolbar-toggle.active {
+  background: #111111;
+  border-color: #111111;
+  color: #ffffff;
 }
 
 .toolbar button,
@@ -167,10 +192,11 @@ body {
   background: #ffffff;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.07);
   user-select: none;
-  cursor: grab;
+  cursor: crosshair;
 }
 
-.editor:active {
+.editor.is-panning,
+.editor.is-panning:active {
   cursor: grabbing;
 }
 
@@ -203,11 +229,18 @@ body {
 .cavity {
   position: absolute;
   border: 3px solid #f2cf4a;
-  border-radius: 50%;
   background: rgba(255, 244, 163, 0.34);
   cursor: move;
   box-sizing: border-box;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.65) inset;
+}
+
+.cavity--round {
+  border-radius: 50%;
+}
+
+.cavity--square {
+  border-radius: 10px;
 }
 
 .cavity.is-selected {
@@ -263,6 +296,67 @@ body {
   line-height: 1;
   cursor: pointer;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+}
+
+.selection-box {
+  position: absolute;
+  border: 1px dashed rgba(17, 17, 17, 0.7);
+  background: rgba(17, 17, 17, 0.08);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.group-toolbar {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.group-resize-handle {
+  position: absolute;
+  z-index: 4;
+  width: 18px;
+  height: 18px;
+  background: #ffffff;
+  border-radius: 50%;
+  border: 2px solid #f2cf4a;
+  cursor: nwse-resize;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+}
+
+.group-toolbar__icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid rgba(17, 17, 17, 0.12);
+  border-radius: 10px;
+  background: rgba(17, 17, 17, 0.04);
+  color: #111111;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.group-toolbar__control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #3b3b3b;
+  font-weight: 700;
+}
+
+.group-toolbar__control span {
+  font-size: 0.95rem;
+}
+
+.group-toolbar__control input {
+  width: 84px;
 }
 
 .details-form {
@@ -398,5 +492,19 @@ body {
 
   .details-form {
     grid-template-columns: 1fr;
+  }
+
+  .toolbar {
+    align-items: stretch;
+  }
+
+  .toolbar-cluster {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .group-toolbar {
+    max-width: calc(100% - 24px);
+    flex-wrap: wrap;
   }
 }
