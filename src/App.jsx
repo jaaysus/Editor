@@ -6,7 +6,7 @@ const MIN_ZOOM = 0.4
 const MAX_ZOOM = 3
 const MAX_STAGE_WIDTH = 1000
 const MAX_STAGE_HEIGHT = 700
-const UPLOAD_QUALITY_PERCENT = 8
+const MAX_UPLOAD_WIDTH = 1000
 
 function App() {
   const [image, setImage] = useState(null)
@@ -17,13 +17,38 @@ function App() {
   const [imageResolution, setImageResolution] = useState(null)
   const [mousePosition, setMousePosition] = useState(null)
   const [isRemoveMode, setIsRemoveMode] = useState(false)
+  const [selectedCavityIndex, setSelectedCavityIndex] = useState(null)
   const [draggingCavityIndex, setDraggingIndex] = useState(null)
   const [resizingCavityIndex, setResizingIndex] = useState(null)
+  const [isPanning, setIsPanning] = useState(false)
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
+  const [panStart, setPanStart] = useState(null)
+  const [isDragOver, setIsDragOver] = useState(false)
 
   const editorRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
-  const uploadQuality = clamp(UPLOAD_QUALITY_PERCENT / 100, 0.05, 1)
+  const getPanBounds = (nextZoom = zoom, nextStageSize = stageSize) => {
+    const scaledWidth = nextStageSize.width * nextZoom
+    const scaledHeight = nextStageSize.height * nextZoom
+
+    return {
+      minX: Math.min(0, nextStageSize.width - scaledWidth),
+      maxX: 0,
+      minY: Math.min(0, nextStageSize.height - scaledHeight),
+      maxY: 0,
+    }
+  }
+
+  const clampPanOffset = (offset, nextZoom = zoom, nextStageSize = stageSize) => {
+    const bounds = getPanBounds(nextZoom, nextStageSize)
+
+    return {
+      x: clamp(offset.x, bounds.minX, bounds.maxX),
+      y: clamp(offset.y, bounds.minY, bounds.maxY),
+    }
+  }
 
   const fitImageToStage = (width, height) => {
     if (!width || !height) {
@@ -57,10 +82,16 @@ function App() {
     }
   }, [imageNaturalSize])
 
+  useEffect(() => {
+    setPanOffset((current) => clampPanOffset(current))
+  }, [zoom, stageSize])
+
   const getPointerPosition = (e) => {
     const rect = editorRef.current.getBoundingClientRect()
-    const mouseX = clamp((e.clientX - rect.left) / zoom, 0, stageSize.width)
-    const mouseY = clamp((e.clientY - rect.top) / zoom, 0, stageSize.height)
+    const viewportX = e.clientX - rect.left
+    const viewportY = e.clientY - rect.top
+    const mouseX = clamp((viewportX - panOffset.x) / zoom, 0, stageSize.width)
+    const mouseY = clamp((viewportY - panOffset.y) / zoom, 0, stageSize.height)
 
     return { mouseX, mouseY }
   }
@@ -70,38 +101,56 @@ function App() {
     setZoom(1)
     setMousePosition(null)
     setIsRemoveMode(false)
+    setSelectedCavityIndex(null)
+    setPanOffset({ x: 0, y: 0 })
+    setPanStart(null)
+    setIsPanning(false)
     setImageNaturalSize(null)
   }
 
-  const compressImage = (source) =>
+  const prepareImageForUpload = (source) =>
     new Promise((resolve, reject) => {
       const img = new Image()
 
       img.onload = () => {
+        if (img.naturalWidth <= MAX_UPLOAD_WIDTH) {
+          resolve(source)
+          return
+        }
+
         const canvas = document.createElement('canvas')
         const ctx = canvas.getContext('2d')
-
-        canvas.width = img.naturalWidth
-        canvas.height = img.naturalHeight
+        const scale = MAX_UPLOAD_WIDTH / img.naturalWidth
+        const targetWidth = Math.round(img.naturalWidth * scale)
+        const targetHeight = Math.round(img.naturalHeight * scale)
 
         if (!ctx) {
           resolve(source)
           return
         }
 
-        ctx.drawImage(img, 0, 0)
+        canvas.width = targetWidth
+        canvas.height = targetHeight
 
-        const compressed = canvas.toDataURL('image/jpeg', uploadQuality)
-        resolve(compressed)
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight)
+
+        resolve(canvas.toDataURL('image/png'))
       }
 
-      img.onerror = () => reject(new Error('Failed to compress uploaded image.'))
+      img.onerror = () => reject(new Error('Failed to process uploaded image.'))
       img.src = source
     })
 
   const handleUpload = async (e) => {
-    const file = e.target.files[0]
+    const file = e.target.files?.[0]
 
+    if (!file) return
+
+    await loadFile(file)
+    e.target.value = ''
+  }
+
+  const loadFile = async (file) => {
     if (!file) return
 
     const reader = new FileReader()
@@ -109,8 +158,8 @@ function App() {
     reader.onload = async () => {
       try {
         resetEditorState()
-        const compressedImage = await compressImage(reader.result)
-        setImage(compressedImage)
+        const preparedImage = await prepareImageForUpload(reader.result)
+        setImage(preparedImage)
       } catch (error) {
         console.error(error)
         setImage(reader.result)
@@ -120,14 +169,37 @@ function App() {
     reader.readAsDataURL(file)
   }
 
+  const handleDrop = async (e) => {
+    e.preventDefault()
+    setIsDragOver(false)
+
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+
+    await loadFile(file)
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+
   const handleImageLoad = (e) => {
     const { naturalWidth, naturalHeight } = e.target
     setImageNaturalSize({ width: naturalWidth, height: naturalHeight })
     setImageResolution({ width: naturalWidth, height: naturalHeight })
     setStageSize(fitImageToStage(naturalWidth, naturalHeight))
+    setPanOffset({ x: 0, y: 0 })
   }
 
   const addCavity = () => {
+    const nextIndex = cavities.length
+
     setCavities([
       ...cavities,
       {
@@ -136,10 +208,16 @@ function App() {
         size: Math.max(48, Math.min(stageSize.width, stageSize.height) * 0.12),
       },
     ])
+    setSelectedCavityIndex(nextIndex)
   }
 
   const removeCavity = (indexToRemove) => {
     setCavities(cavities.filter((_, index) => index !== indexToRemove))
+    setSelectedCavityIndex((current) => {
+      if (current === indexToRemove) return null
+      if (current === null) return null
+      return current > indexToRemove ? current - 1 : current
+    })
   }
 
   const handleMouseMove = (e) => {
@@ -160,6 +238,7 @@ function App() {
       cavity.y = clamp(mouseY, radius, stageSize.height - radius)
 
       setCavities(updated)
+      return
     }
 
     if (resizingCavityIndex !== null) {
@@ -178,18 +257,29 @@ function App() {
       cavity.size = clamp(distance * 2, 36, maxRadius * 2)
 
       setCavities(updated)
+      return
+    }
+
+    if (isPanning && panStart) {
+      const nextOffset = {
+        x: panStart.originX + (e.clientX - panStart.pointerX),
+        y: panStart.originY + (e.clientY - panStart.pointerY),
+      }
+
+      setPanOffset(clampPanOffset(nextOffset))
     }
   }
 
   const handleMouseLeave = () => {
     setMousePosition(null)
-    setDraggingIndex(null)
-    setResizingIndex(null)
+    stopActions()
   }
 
   const stopActions = () => {
     setDraggingIndex(null)
     setResizingIndex(null)
+    setIsPanning(false)
+    setPanStart(null)
   }
 
   const zoomIn = () => setZoom((current) => clamp(current + ZOOM_STEP, MIN_ZOOM, MAX_ZOOM))
@@ -236,132 +326,188 @@ function App() {
     img.src = image
   }
 
-  const editorWidth = Math.round(stageSize.width * zoom)
-  const editorHeight = Math.round(stageSize.height * zoom)
+  const editorWidth = stageSize.width
+  const editorHeight = stageSize.height
 
   return (
     <div className="app">
       <h1>Cavity Editor</h1>
 
-      <div className="toolbar">
-        <input type="file" accept="image/*" onChange={handleUpload} />
+      <input
+        ref={fileInputRef}
+        className="sr-only-input"
+        type="file"
+        accept="image/*"
+        onChange={handleUpload}
+      />
 
-        <button onClick={addCavity} disabled={!image}>
-          Add Cavity
-        </button>
+      {image ? (
+        <>
+          <div className="toolbar">
+            <button onClick={() => fileInputRef.current?.click()}>Upload New Image</button>
 
-        <button
-          className={isRemoveMode ? 'danger-button active' : 'danger-button'}
-          onClick={() => setIsRemoveMode((current) => !current)}
-          disabled={!image || cavities.length === 0}
-        >
-          {isRemoveMode ? 'Done Removing' : 'Remove'}
-        </button>
+            <button onClick={addCavity} disabled={!image}>
+              Add Cavity
+            </button>
 
-        <button onClick={downloadImage} disabled={!image}>
-          Download
-        </button>
-      </div>
+            <button
+              className={isRemoveMode ? 'danger-button active' : 'danger-button'}
+              onClick={() => setIsRemoveMode((current) => !current)}
+              disabled={!image || cavities.length === 0}
+            >
+              {isRemoveMode ? 'Done Removing' : 'Remove'}
+            </button>
 
-      <div className="editor-shell">
-        <div
-          className="editor"
-          ref={editorRef}
-          style={{
-            width: editorWidth,
-            height: editorHeight,
-          }}
-          onMouseMove={handleMouseMove}
-          onMouseUp={stopActions}
-          onMouseLeave={handleMouseLeave}
-        >
-          <div
-            className="editor-stage"
-            style={{
-              width: stageSize.width,
-              height: stageSize.height,
-              transform: `scale(${zoom})`,
-            }}
-          >
-            {image ? (
-              <img
-                src={image}
-                alt="Uploaded"
-                className="main-image"
-                onLoad={handleImageLoad}
+            <button onClick={downloadImage} disabled={!image}>
+              Download
+            </button>
+          </div>
+
+          <div className="editor-shell">
+            <div
+              className="editor"
+              ref={editorRef}
+              style={{
+                width: editorWidth,
+                height: editorHeight,
+              }}
+              onMouseDown={(e) => {
+                if (e.target !== e.currentTarget && !(e.target instanceof HTMLImageElement)) return
+
+                setSelectedCavityIndex(null)
+                setIsPanning(true)
+                setPanStart({
+                  pointerX: e.clientX,
+                  pointerY: e.clientY,
+                  originX: panOffset.x,
+                  originY: panOffset.y,
+                })
+              }}
+              onMouseMove={handleMouseMove}
+              onMouseUp={stopActions}
+              onMouseLeave={handleMouseLeave}
+            >
+              <div
+                className="editor-pan"
                 style={{
-                  width: stageSize.width,
-                  height: stageSize.height,
+                  width: stageSize.width * zoom,
+                  height: stageSize.height * zoom,
+                  transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
                 }}
-              />
-            ) : (
-              <div className="empty-state">Upload a photo to start placing cavities.</div>
-            )}
-
-            {image &&
-              cavities.map((cavity, index) => (
+              >
                 <div
-                  key={index}
-                  className={isRemoveMode ? 'cavity remove-mode' : 'cavity'}
-                  onMouseDown={() => {
-                    if (isRemoveMode) return
-                    setDraggingIndex(index)
-                  }}
+                  className="editor-stage"
                   style={{
-                    width: cavity.size,
-                    height: cavity.size,
-                    left: cavity.x - cavity.size / 2,
-                    top: cavity.y - cavity.size / 2,
+                    width: stageSize.width,
+                    height: stageSize.height,
+                    transform: `scale(${zoom})`,
                   }}
                 >
-                  {isRemoveMode && (
-                    <button
-                      className="remove-cavity"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        removeCavity(index)
-                      }}
-                    >
-                      x
-                    </button>
-                  )}
+                <img
+                  src={image}
+                  alt="Uploaded"
+                  className="main-image"
+                  onLoad={handleImageLoad}
+                  style={{
+                    width: stageSize.width,
+                    height: stageSize.height,
+                  }}
+                />
 
-                  {!isRemoveMode && (
-                    <div
-                      className="resize-handle"
-                      onMouseDown={(e) => {
-                        e.stopPropagation()
-                        setResizingIndex(index)
-                      }}
-                    />
-                  )}
+                {cavities.map((cavity, index) => (
+                  <div
+                    key={index}
+                    className={isRemoveMode ? 'cavity remove-mode' : 'cavity'}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      setSelectedCavityIndex(index)
+                      if (isRemoveMode) return
+                      setDraggingIndex(index)
+                    }}
+                    style={{
+                      width: cavity.size,
+                      height: cavity.size,
+                      left: cavity.x - cavity.size / 2,
+                      top: cavity.y - cavity.size / 2,
+                    }}
+                  >
+                    {isRemoveMode && (
+                      <button
+                        className="remove-cavity"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeCavity(index)
+                        }}
+                      >
+                        x
+                      </button>
+                    )}
+
+                    {!isRemoveMode && selectedCavityIndex === index && (
+                      <div
+                        className="resize-handle"
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                          setSelectedCavityIndex(index)
+                          setResizingIndex(index)
+                        }}
+                      />
+                    )}
+                  </div>
+                ))}
                 </div>
-              ))}
-          </div>
-        </div>
+              </div>
+            </div>
 
-        <div className="status-chip resolution-chip">
-          {imageResolution
-            ? `Resolution: ${imageResolution.width} x ${imageResolution.height}`
-            : 'Resolution: -'}
-        </div>
+            <div className="status-chip resolution-chip">
+              {imageResolution
+                ? `Resolution: ${imageResolution.width} x ${imageResolution.height}`
+                : 'Resolution: -'}
+            </div>
 
-        <div className="bottom-right-panel">
-          <div className="status-chip position-chip">
-            {mousePosition ? `X: ${mousePosition.x}, Y: ${mousePosition.y}` : 'X: -, Y: -'}
+            <div className="bottom-right-panel">
+              <div className="status-chip position-chip">
+                {mousePosition ? `X: ${mousePosition.x}, Y: ${mousePosition.y}` : 'X: -, Y: -'}
+              </div>
+
+              <div className="zoom-controls">
+                <button onClick={zoomOut} disabled={!image || zoom <= MIN_ZOOM}>
+                  -
+                </button>
+                <span>{Math.round(zoom * 100)}%</span>
+                <button onClick={zoomIn} disabled={!image || zoom >= MAX_ZOOM}>
+                  +
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="zoom-controls">
-            <button onClick={zoomOut} disabled={!image || zoom <= MIN_ZOOM}>
-              -
-            </button>
-            <span>{Math.round(zoom * 100)}%</span>
-            <button onClick={zoomIn} disabled={!image || zoom >= MAX_ZOOM}>
-              +
-            </button>
-          </div>
-        </div>
-      </div>
+          <form className="details-form">
+            {[1, 2, 3, 4, 5, 6].map((fieldNumber) => (
+              <label key={fieldNumber} className="details-form__field">
+                <span>Field {fieldNumber}</span>
+                <input type="text" placeholder={`Enter value ${fieldNumber}`} />
+              </label>
+            ))}
+          </form>
+        </>
+      ) : (
+        <button
+          type="button"
+          className={isDragOver ? 'upload-dropzone drag-over' : 'upload-dropzone'}
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <span className="upload-dropzone__eyebrow">Start with an image</span>
+          <span className="upload-dropzone__title">Upload or drag and drop</span>
+          <span className="upload-dropzone__subtitle">
+            Choose a photo to open the editor and begin placing cavities.
+          </span>
+          <span className="upload-dropzone__cta">Browse files</span>
+        </button>
+      )}
     </div>
   )
 }
