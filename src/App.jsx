@@ -43,6 +43,8 @@ function App() {
     epn: '',
   })
 
+  const [numberingOrder, setNumberingOrder] = useState('ltr-down') // ltr-down | ltr-up | rtl-down | rtl-up
+  const [numberPlacement, setNumberPlacement] = useState('outward') // outward | inward
   const editorRef = useRef(null)
   const fileInputRef = useRef(null)
   const colorCommitTimeoutsRef = useRef(new Map())
@@ -121,6 +123,51 @@ function App() {
       if (Math.abs(cavityA.x - cavityB.x) > 2) return cavityA.x - cavityB.x
       return cavityA.y - cavityB.y
     })
+    // Returns a Map<cavityIndex, displayNumber> based on chosen ordering
+  const computeNumberedCavities = (allCavities, order) => {
+    const indexed = allCavities.map((cavity, index) => ({ cavity, index }))
+
+    indexed.sort((a, b) => {
+      const { cavity: ca } = a
+      const { cavity: cb } = b
+
+      if (order === 'ltr-down') {
+        // Left-to-right, top row first, within each row left-to-right
+        const rowA = Math.round(ca.y / 10)
+        const rowB = Math.round(cb.y / 10)
+        if (rowA !== rowB) return rowA - rowB
+        return ca.x - cb.x
+      }
+      if (order === 'ltr-up') {
+        // Left-to-right, bottom row first
+        const rowA = Math.round(ca.y / 10)
+        const rowB = Math.round(cb.y / 10)
+        if (rowA !== rowB) return rowB - rowA
+        return ca.x - cb.x
+      }
+      if (order === 'rtl-down') {
+        // Right-to-left, top row first
+        const rowA = Math.round(ca.y / 10)
+        const rowB = Math.round(cb.y / 10)
+        if (rowA !== rowB) return rowA - rowB
+        return cb.x - ca.x
+      }
+      if (order === 'rtl-up') {
+        // Right-to-left, bottom row first
+        const rowA = Math.round(ca.y / 10)
+        const rowB = Math.round(cb.y / 10)
+        if (rowA !== rowB) return rowB - rowA
+        return cb.x - ca.x
+      }
+      return 0
+    })
+
+    const map = new Map()
+    indexed.forEach(({ index }, position) => {
+      map.set(index, position + 1)
+    })
+    return map
+  }
 
   const inferSpacingFromSelection = (indices) => {
     const sorted = sortIndicesForConnectorLayout(indices)
@@ -191,6 +238,11 @@ function App() {
     if (!hasGroupSelection) return null
     return getSelectionBounds(selectedCavityIndices)
   }, [cavities, hasGroupSelection, selectedCavityIndices])
+
+  const numberedCavities = useMemo(
+    () => computeNumberedCavities(cavities, numberingOrder),
+    [cavities, numberingOrder]
+  )
 
   const singleToolbarPosition = useMemo(() => {
     if (activeSingleSelection === null || !activeSingleCavity) return null
@@ -972,6 +1024,67 @@ function App() {
             <button onClick={downloadImage} disabled={!image} type="button">
               Download
             </button>
+
+            <button onClick={downloadImage} disabled={!image} type="button">
+              Download
+            </button>
+
+            <div className="toolbar-cluster">
+              <span className="toolbar-label">Numbering</span>
+              <button
+                className={numberingOrder === 'ltr-down' ? 'toolbar-toggle active' : 'toolbar-toggle'}
+                onClick={() => setNumberingOrder('ltr-down')}
+                type="button"
+                title="Left→Right, Top→Bottom"
+              >
+                →↓
+              </button>
+              <button
+                className={numberingOrder === 'ltr-up' ? 'toolbar-toggle active' : 'toolbar-toggle'}
+                onClick={() => setNumberingOrder('ltr-up')}
+                type="button"
+                title="Left→Right, Bottom→Top"
+              >
+                →↑
+              </button>
+              <button
+                className={numberingOrder === 'rtl-down' ? 'toolbar-toggle active' : 'toolbar-toggle'}
+                onClick={() => setNumberingOrder('rtl-down')}
+                type="button"
+                title="Right→Left, Top→Bottom"
+              >
+                ←↓
+              </button>
+              <button
+                className={numberingOrder === 'rtl-up' ? 'toolbar-toggle active' : 'toolbar-toggle'}
+                onClick={() => setNumberingOrder('rtl-up')}
+                type="button"
+                title="Right→Left, Bottom→Top"
+              >
+                ←↑
+              </button>
+            </div>
+
+            <div className="toolbar-cluster">
+              <span className="toolbar-label">Label</span>
+              <button
+                className={numberPlacement === 'outward' ? 'toolbar-toggle active' : 'toolbar-toggle'}
+                onClick={() => setNumberPlacement('outward')}
+                type="button"
+                title="Number outside cavity"
+              >
+                Out
+              </button>
+              <button
+                className={numberPlacement === 'inward' ? 'toolbar-toggle active' : 'toolbar-toggle'}
+                onClick={() => setNumberPlacement('inward')}
+                type="button"
+                title="Number inside cavity"
+              >
+                In
+              </button>
+            </div>
+
           </div>
 
           <div className="editor-shell">
@@ -1116,7 +1229,7 @@ function App() {
                         </button>
                       )}
 
-                      {!isRemoveMode && activeSingleSelection === index && (
+                        {!isRemoveMode && activeSingleSelection === index && (
                         <div
                           className="resize-handle"
                           onMouseDown={(e) => {
@@ -1126,6 +1239,13 @@ function App() {
                           }}
                         />
                       )}
+
+                      <span
+                        className={`cavity-number cavity-number--${numberPlacement}`}
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        {numberedCavities.get(index)}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1357,7 +1477,7 @@ function App() {
                   ) : (
                     cavities.map((cavity, index) => (
                       <tr key={index}>
-                        <td>{index + 1}</td>
+                        <td>{numberedCavities.get(index)}</td>
                         <td>
                           <div className="table-number-group">
                             <input

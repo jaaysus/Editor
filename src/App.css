@@ -709,3 +709,37 @@ body {
     flex-wrap: wrap;
   }
 }
+
+/* ── Cavity number labels ─────────────────────────────────────── */
+.cavity-number {
+  position: absolute;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #ffffff;
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.9),
+    0 1px 2px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  user-select: none;
+  z-index: 2;
+}
+
+/* Inward: centered inside the cavity */
+.cavity-number--inward {
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Outward: sits just outside the top-left corner */
+.cavity-number--outward {
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(17, 17, 17, 0.72);
+  border-radius: 999px;
+  padding: 2px 5px;
+  font-size: 0.65rem;
+}
