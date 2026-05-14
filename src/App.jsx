@@ -10,6 +10,7 @@ const MAX_UPLOAD_WIDTH = 1000
 const DEFAULT_CAVITY_SIZE = 72
 const DEFAULT_COLUMN_SPACING = 96
 const DEFAULT_ROW_SPACING = 92
+const DEFAULT_CAVITY_COLORS = ['#f2cf4a', '#f2cf4a', '#f2cf4a']
 
 function App() {
   const [image, setImage] = useState(null)
@@ -37,11 +38,41 @@ function App() {
     column: DEFAULT_COLUMN_SPACING,
     row: DEFAULT_ROW_SPACING,
   })
+  const [connectorInfo, setConnectorInfo] = useState({
+    name: '',
+    epn: '',
+  })
 
   const editorRef = useRef(null)
   const fileInputRef = useRef(null)
+  const colorCommitTimeoutsRef = useRef(new Map())
 
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
+
+  const getCavityFillStyle = (cavity) => {
+    const colors = cavity.colors || DEFAULT_CAVITY_COLORS
+    const segmentCount = cavity.segmentCount || 1
+
+    if (cavity.shape !== 'round') {
+      return {}
+    }
+
+    if (segmentCount === 1) {
+      return {
+        background: colors[0],
+      }
+    }
+
+    if (segmentCount === 2) {
+      return {
+        background: `conic-gradient(from -30deg, ${colors[1]} 0deg 120deg, ${colors[0]} 120deg 360deg)`,
+      }
+    }
+
+    return {
+      background: `conic-gradient(from -30deg, ${colors[0]} 0deg 120deg, ${colors[1]} 120deg 240deg, ${colors[2]} 240deg 360deg)`,
+    }
+  }
 
   const fitImageToStage = (width, height) => {
     if (!width || !height) {
@@ -154,11 +185,24 @@ function App() {
   const activeSingleSelection =
     selectedCavityIndices.length === 1 ? selectedCavityIndices[0] : null
   const hasGroupSelection = selectedCavityIndices.length > 1
+  const activeSingleCavity = activeSingleSelection !== null ? cavities[activeSingleSelection] : null
 
   const selectedGroupBounds = useMemo(() => {
     if (!hasGroupSelection) return null
     return getSelectionBounds(selectedCavityIndices)
   }, [cavities, hasGroupSelection, selectedCavityIndices])
+
+  const singleToolbarPosition = useMemo(() => {
+    if (activeSingleSelection === null || !activeSingleCavity) return null
+
+    const left = activeSingleCavity.x - activeSingleCavity.size / 2
+    const top = activeSingleCavity.y - activeSingleCavity.size / 2
+
+    return {
+      left: clamp(left * zoom + panOffset.x, 16, Math.max(16, stageSize.width - 240)),
+      top: clamp(top * zoom + panOffset.y - 70, 16, Math.max(16, stageSize.height - 72)),
+    }
+  }, [activeSingleCavity, activeSingleSelection, panOffset.x, panOffset.y, stageSize, zoom])
 
   const groupToolbarPosition = useMemo(() => {
     if (!hasGroupSelection) return null
@@ -203,6 +247,13 @@ function App() {
       setBatchLayout(inferLayoutFromSelection(selectedCavityIndices))
     }
   }, [selectedCavityIndices])
+
+  useEffect(() => {
+    return () => {
+      colorCommitTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId))
+      colorCommitTimeoutsRef.current.clear()
+    }
+  }, [])
 
   const getPointerPosition = (e) => {
     const rect = editorRef.current.getBoundingClientRect()
@@ -324,6 +375,8 @@ function App() {
     x,
     y,
     shape,
+    segmentCount: 1,
+    colors: [...DEFAULT_CAVITY_COLORS],
     size: Math.max(48, Math.min(stageSize.width, stageSize.height, DEFAULT_CAVITY_SIZE)),
   })
 
@@ -467,6 +520,113 @@ function App() {
         selectedCavityIndices.includes(index) ? { ...cavity, shape } : cavity
       )
     )
+  }
+
+  const updateCavityColors = (index, updater) => {
+    setCavities((current) =>
+      current.map((cavity, cavityIndex) => {
+        if (cavityIndex !== index) return cavity
+
+        const nextColors = updater([...(cavity.colors || DEFAULT_CAVITY_COLORS)])
+        return {
+          ...cavity,
+          colors: nextColors,
+        }
+      })
+    )
+  }
+
+  const scheduleCavityColorUpdate = (key, callback) => {
+    const existingTimeout = colorCommitTimeoutsRef.current.get(key)
+    if (existingTimeout) {
+      window.clearTimeout(existingTimeout)
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      callback()
+      colorCommitTimeoutsRef.current.delete(key)
+    }, 120)
+
+    colorCommitTimeoutsRef.current.set(key, timeoutId)
+  }
+
+  const updateCavityNumericField = (index, field, value) => {
+    const nextValue = Number(value)
+    if (Number.isNaN(nextValue)) return
+
+    setCavities((current) =>
+      current.map((cavity, cavityIndex) => {
+        if (cavityIndex !== index) return cavity
+
+        if (field === 'size') {
+          const maxRadius = Math.min(
+            cavity.x,
+            cavity.y,
+            stageSize.width - cavity.x,
+            stageSize.height - cavity.y
+          )
+
+          return {
+            ...cavity,
+            size: clamp(nextValue, 36, maxRadius * 2),
+          }
+        }
+
+        const radius = cavity.size / 2
+
+        return {
+          ...cavity,
+          [field]: clamp(
+            nextValue,
+            radius,
+            field === 'x' ? stageSize.width - radius : stageSize.height - radius
+          ),
+        }
+      })
+    )
+  }
+
+  const updateSingleCavity = (updater) => {
+    if (activeSingleSelection === null) return
+
+    setCavities((current) =>
+      current.map((cavity, index) =>
+        index === activeSingleSelection ? updater(cavity) : cavity
+      )
+    )
+  }
+
+  const updateSingleShape = (shape) => {
+    updateSingleCavity((cavity) => ({ ...cavity, shape }))
+  }
+
+  const updateSingleSegmentCount = (segmentCount) => {
+    updateSingleCavity((cavity) => ({
+      ...cavity,
+      segmentCount,
+      colors: [
+        cavity.colors?.[0] || DEFAULT_CAVITY_COLORS[0],
+        cavity.colors?.[1] || cavity.colors?.[0] || DEFAULT_CAVITY_COLORS[1],
+        cavity.colors?.[2] || cavity.colors?.[0] || DEFAULT_CAVITY_COLORS[2],
+      ],
+    }))
+  }
+
+  const updateSingleColor = (colorIndex, value) => {
+    updateSingleCavity((cavity) => {
+      const nextColors = [...(cavity.colors || DEFAULT_CAVITY_COLORS)]
+      nextColors[colorIndex] = value
+
+      if (cavity.segmentCount === 1) {
+        nextColors[1] = value
+        nextColors[2] = value
+      }
+
+      return {
+        ...cavity,
+        colors: nextColors,
+      }
+    })
   }
 
   const handleMouseMove = (e) => {
@@ -644,19 +804,73 @@ function App() {
         const drawY = cavity.y * scaleY
         const drawWidth = cavity.size * scaleX
         const drawHeight = cavity.size * scaleY
+        const left = drawX - drawWidth / 2
+        const top = drawY - drawHeight / 2
+        const colors = cavity.colors || DEFAULT_CAVITY_COLORS
+        const segmentCount = cavity.segmentCount || 1
 
+        ctx.save()
         ctx.beginPath()
 
         if (cavity.shape === 'square') {
-          ctx.rect(drawX - drawWidth / 2, drawY - drawHeight / 2, drawWidth, drawHeight)
+          ctx.rect(left, top, drawWidth, drawHeight)
         } else {
           ctx.arc(drawX, drawY, drawWidth / 2, 0, Math.PI * 2)
         }
 
-        ctx.fillStyle = 'rgba(255, 244, 163, 0.42)'
-        ctx.fill()
+        ctx.clip()
+
+        if (cavity.shape === 'square') {
+          const segmentWidth = drawWidth / segmentCount
+
+          for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+            ctx.fillStyle = `${colors[segmentIndex] || DEFAULT_CAVITY_COLORS[segmentIndex]}aa`
+            ctx.fillRect(left + segmentWidth * segmentIndex, top, segmentWidth, drawHeight)
+          }
+        } else {
+          const radius = drawWidth / 2
+          const effectiveSegments =
+            segmentCount === 2
+              ? [
+                  { color: colors[1] || DEFAULT_CAVITY_COLORS[1], start: -Math.PI / 6, end: Math.PI / 2 },
+                  { color: colors[0] || DEFAULT_CAVITY_COLORS[0], start: Math.PI / 2, end: Math.PI * 11 / 6 },
+                ]
+              : Array.from({ length: segmentCount }, (_, segmentIndex) => {
+                  const angleSize = (Math.PI * 2) / segmentCount
+                  const startAngle = -Math.PI / 6 + angleSize * segmentIndex
+                  const endAngle = startAngle + angleSize
+
+                  return {
+                    color: colors[segmentIndex] || DEFAULT_CAVITY_COLORS[segmentIndex],
+                    start: startAngle,
+                    end: endAngle,
+                  }
+                })
+
+          effectiveSegments.forEach((segment) => {
+            const startAngle = segment.start
+            const endAngle = segment.end
+
+            ctx.beginPath()
+            ctx.moveTo(drawX, drawY)
+            ctx.arc(drawX, drawY, radius, startAngle, endAngle)
+            ctx.closePath()
+            ctx.fillStyle = `${segment.color}aa`
+            ctx.fill()
+          })
+        }
+
+        ctx.restore()
+        ctx.beginPath()
+
+        if (cavity.shape === 'square') {
+          ctx.rect(left, top, drawWidth, drawHeight)
+        } else {
+          ctx.arc(drawX, drawY, drawWidth / 2, 0, Math.PI * 2)
+        }
+
         ctx.lineWidth = 4
-        ctx.strokeStyle = '#f2cf4a'
+        ctx.strokeStyle = colors[0] || DEFAULT_CAVITY_COLORS[0]
         ctx.stroke()
       })
 
@@ -742,14 +956,14 @@ function App() {
                 onChange={(e) => setBatchCount(clamp(Number(e.target.value) || 1, 1, 200))}
               />
               <button onClick={addCavities} disabled={!image} type="button">
-                Add Batch
+                Add
               </button>
             </div>
 
             <button
               className={isRemoveMode ? 'danger-button active' : 'danger-button'}
               onClick={() => setIsRemoveMode((current) => !current)}
-              disabled={!image || cavities.length === 0}
+              disabled={!image || (!isRemoveMode && cavities.length === 0)}
               type="button"
             >
               {isRemoveMode ? 'Done Removing' : 'Remove'}
@@ -869,8 +1083,26 @@ function App() {
                         height: cavity.size,
                         left: cavity.x - cavity.size / 2,
                         top: cavity.y - cavity.size / 2,
+                        borderColor: (cavity.colors || DEFAULT_CAVITY_COLORS)[0],
                       }}
                     >
+                      <div
+                        className={`cavity-fill cavity-fill--${cavity.segmentCount || 1}`}
+                        style={cavity.shape === 'round' ? getCavityFillStyle(cavity) : undefined}
+                      >
+                        {cavity.shape === 'square' &&
+                          ((cavity.segmentCount || 1) > 1
+                            ? (cavity.colors || DEFAULT_CAVITY_COLORS).slice(0, cavity.segmentCount || 1)
+                            : [(cavity.colors || DEFAULT_CAVITY_COLORS)[0]]
+                          ).map((color, segmentIndex) => (
+                            <div
+                              key={segmentIndex}
+                              className={`cavity-fill__segment cavity-fill__segment--${segmentIndex + 1} cavity-fill__segment-count--${cavity.segmentCount || 1}`}
+                              style={{ background: color }}
+                            />
+                          ))}
+                      </div>
+
                       {isRemoveMode && (
                         <button
                           className="remove-cavity"
@@ -946,6 +1178,76 @@ function App() {
                 </div>
               )}
 
+              {singleToolbarPosition && activeSingleCavity && (
+                <div
+                  className="single-toolbar"
+                  style={{
+                    left: singleToolbarPosition.left,
+                    top: singleToolbarPosition.top,
+                  }}
+                >
+                  <button
+                    className={`group-toolbar__icon${activeSingleCavity.shape === 'round' ? ' is-active' : ''}`}
+                    onClick={() => updateSingleShape('round')}
+                    type="button"
+                    title="Round cavity"
+                  >
+                    O
+                  </button>
+                  <button
+                    className={`group-toolbar__icon${activeSingleCavity.shape === 'square' ? ' is-active' : ''}`}
+                    onClick={() => updateSingleShape('square')}
+                    type="button"
+                    title="Square cavity"
+                  >
+                    []
+                  </button>
+                  <button
+                    className={`group-toolbar__icon${activeSingleCavity.segmentCount === 1 ? ' is-active' : ''}`}
+                    onClick={() => updateSingleSegmentCount(1)}
+                    type="button"
+                    title="Solid fill"
+                  >
+                    1
+                  </button>
+                  <button
+                    className={`group-toolbar__icon${activeSingleCavity.segmentCount === 2 ? ' is-active' : ''}`}
+                    onClick={() => updateSingleSegmentCount(2)}
+                    type="button"
+                    title="Split in two"
+                  >
+                    2
+                  </button>
+                  <button
+                    className={`group-toolbar__icon${activeSingleCavity.segmentCount === 3 ? ' is-active' : ''}`}
+                    onClick={() => updateSingleSegmentCount(3)}
+                    type="button"
+                    title="Split in three"
+                  >
+                    3
+                  </button>
+                  <div className="single-toolbar__colors">
+                    {((activeSingleCavity.segmentCount || 1) > 1
+                      ? (activeSingleCavity.colors || DEFAULT_CAVITY_COLORS).slice(0, activeSingleCavity.segmentCount || 1)
+                      : [(activeSingleCavity.colors || DEFAULT_CAVITY_COLORS)[0]]
+                    ).map((color, colorIndex) => (
+                      <label key={colorIndex} className="color-swatch">
+                        <input
+                          type="color"
+                          defaultValue={color}
+                          key={`${activeSingleSelection}-${colorIndex}-${color}`}
+                          onChange={(e) =>
+                            scheduleCavityColorUpdate(`single-${activeSingleSelection}-${colorIndex}`, () =>
+                              updateSingleColor(colorIndex, e.target.value)
+                            )
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {selectedGroupBounds && (
                 <div
                   className="group-resize-handle"
@@ -1006,14 +1308,111 @@ function App() {
             </div>
           </div>
 
-          <form className="details-form">
-            {[1, 2, 3, 4, 5, 6].map((fieldNumber) => (
-              <label key={fieldNumber} className="details-form__field">
-                <span>Field {fieldNumber}</span>
-                <input type="text" placeholder={`Enter value ${fieldNumber}`} />
+          <section className="connector-panel">
+            <div className="connector-form">
+              <label className="connector-form__field">
+                <span>Name</span>
+                <input
+                  type="text"
+                  value={connectorInfo.name}
+                  onChange={(e) =>
+                    setConnectorInfo((current) => ({ ...current, name: e.target.value }))
+                  }
+                  placeholder="Connector name"
+                />
               </label>
-            ))}
-          </form>
+
+              <label className="connector-form__field">
+                <span>Epn</span>
+                <input
+                  type="text"
+                  value={connectorInfo.epn}
+                  onChange={(e) =>
+                    setConnectorInfo((current) => ({ ...current, epn: e.target.value }))
+                  }
+                  placeholder="Epn"
+                />
+              </label>
+            </div>
+
+            <div className="cavity-table-wrap">
+              <table className="cavity-table">
+                <thead>
+                  <tr>
+                    <th>Number</th>
+                    <th>Position</th>
+                    <th>Size</th>
+                    <th>Color 1</th>
+                    <th>Color 2</th>
+                    <th>Color 3</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cavities.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="cavity-table__empty">
+                        No cavities added yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    cavities.map((cavity, index) => (
+                      <tr key={index}>
+                        <td>{index + 1}</td>
+                        <td>
+                          <div className="table-number-group">
+                            <input
+                              type="number"
+                              value={Math.round(cavity.x)}
+                              onChange={(e) => updateCavityNumericField(index, 'x', e.target.value)}
+                            />
+                            <input
+                              type="number"
+                              value={Math.round(cavity.y)}
+                              onChange={(e) => updateCavityNumericField(index, 'y', e.target.value)}
+                            />
+                          </div>
+                        </td>
+                        <td>
+                          <input
+                            className="table-size-input"
+                            type="number"
+                            value={Math.round(cavity.size)}
+                            onChange={(e) => updateCavityNumericField(index, 'size', e.target.value)}
+                          />
+                        </td>
+                        {[0, 1, 2].map((colorIndex) => (
+                          <td key={colorIndex}>
+                            <label className="table-color">
+                              <input
+                                type="color"
+                                defaultValue={(cavity.colors || DEFAULT_CAVITY_COLORS)[colorIndex]}
+                                key={`${index}-${colorIndex}-${(cavity.colors || DEFAULT_CAVITY_COLORS)[colorIndex]}`}
+                                onChange={(e) =>
+                                  scheduleCavityColorUpdate(`table-${index}-${colorIndex}`, () =>
+                                    updateCavityColors(index, (nextColors) => {
+                                      nextColors[colorIndex] = e.target.value
+
+                                      if ((cavity.segmentCount || 1) === 1) {
+                                        nextColors[0] = e.target.value
+                                        nextColors[1] = e.target.value
+                                        nextColors[2] = e.target.value
+                                      }
+
+                                      return nextColors
+                                    })
+                                  )
+                                }
+                              />
+                            </label>
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
       ) : (
         <button
