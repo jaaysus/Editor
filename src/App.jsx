@@ -38,13 +38,14 @@ function App() {
     column: DEFAULT_COLUMN_SPACING,
     row: DEFAULT_ROW_SPACING,
   })
-  const [connectorInfo, setConnectorInfo] = useState({
+  const [epnInfo, setEpnInfo] = useState({
     name: '',
     epn: '',
   })
 
   const [numberingOrder, setNumberingOrder] = useState('ltr-down') // ltr-down | ltr-up | rtl-down | rtl-up
   const [numberPlacement, setNumberPlacement] = useState('outward') // outward | inward
+  const [activeNav, setActiveNav] = useState('home')
   const editorRef = useRef(null)
   const fileInputRef = useRef(null)
   const colorCommitTimeoutsRef = useRef(new Map())
@@ -114,7 +115,7 @@ function App() {
     }
   }
 
-  const sortIndicesForConnectorLayout = (indices) =>
+  const sortIndicesForEpnLayout = (indices) =>
     [...indices].sort((a, b) => {
       const cavityA = cavities[a]
       const cavityB = cavities[b]
@@ -170,7 +171,7 @@ function App() {
   }
 
   const inferSpacingFromSelection = (indices) => {
-    const sorted = sortIndicesForConnectorLayout(indices)
+    const sorted = sortIndicesForEpnLayout(indices)
 
     if (sorted.length < 2) {
       return {
@@ -429,7 +430,7 @@ function App() {
     shape,
     segmentCount: 1,
     colors: [...DEFAULT_CAVITY_COLORS],
-    size: Math.max(48, Math.min(stageSize.width, stageSize.height, DEFAULT_CAVITY_SIZE)),
+    size: Math.max(20, Math.min(stageSize.width, stageSize.height, DEFAULT_CAVITY_SIZE)),
   })
 
   const layoutBatchSequence = (count, shape = cavityShape, layout = batchLayout) => {
@@ -470,7 +471,7 @@ function App() {
       36,
       Math.max(36, stageSize.width - horizontalSpan - 36)
     )
-    const startY = clamp(stageSize.height / 2 - batchSpacing.row / 2, 36, stageSize.height - 36)
+    const startY = clamp(stageSize.height / 2 - batchSpacing.row / 2, 20, stageSize.height - 20)
 
     return Array.from({ length: safeCount }, (_, index) => {
       const columnIndex = Math.floor(index / 2)
@@ -505,7 +506,7 @@ function App() {
     const bounds = getSelectionBounds(indices)
     if (!bounds) return
 
-    const sorted = sortIndicesForConnectorLayout(indices)
+    const sorted = sortIndicesForEpnLayout(indices)
 
     setCavities((current) => {
       const updated = [...current]
@@ -620,7 +621,7 @@ function App() {
 
           return {
             ...cavity,
-            size: clamp(nextValue, 36, maxRadius * 2),
+            size: clamp(nextValue, 20, maxRadius * 2),
           }
         }
 
@@ -744,7 +745,7 @@ function App() {
 
         updated[resizingCavityIndex] = {
           ...cavity,
-          size: clamp(distance * 2, 36, maxRadius * 2),
+          size: clamp(distance * 1, 20, maxRadius * 2),
         }
 
         return updated
@@ -755,7 +756,7 @@ function App() {
     if (groupResizeState) {
       const dx = mouseX - groupResizeState.pointerX
       const dy = mouseY - groupResizeState.pointerY
-      const delta = Math.max(dx, dy)
+      const delta = Math.max(dx, dy) * 0.5
 
       setCavities((current) => {
         const updated = [...current]
@@ -770,7 +771,7 @@ function App() {
 
           updated[index] = {
             ...cavity,
-            size: clamp(cavity.size + delta, 36, maxRadius * 2),
+            size: clamp(cavity.size + delta, 20, maxRadius * 2),
           }
         })
 
@@ -940,6 +941,40 @@ function App() {
 
   return (
     <div className="app">
+      <div className="topbar">
+        <div className="topbar__brand">Cavity Editor</div>
+        <div className="topbar__nav">
+          <button
+            type="button"
+            className={activeNav === 'home' ? 'active' : ''}
+            onClick={() => setActiveNav('home')}
+          >
+            Home
+          </button>
+          <button
+            type="button"
+            className={activeNav === 'epns' ? 'active' : ''}
+            onClick={() => setActiveNav('epns')}
+          >
+            EPNs
+          </button>
+          <button
+            type="button"
+            className={activeNav === 'epn' ? 'active' : ''}
+            onClick={() => setActiveNav('epn')}
+          >
+            EPN
+          </button>
+          <button
+            type="button"
+            className={activeNav === 'cavity-editor' ? 'active' : ''}
+            onClick={() => setActiveNav('cavity-editor')}
+          >
+            Cavity Editor
+          </button>
+        </div>
+      </div>
+
       <h1>Cavity Editor</h1>
 
       <input
@@ -952,7 +987,9 @@ function App() {
 
       {image ? (
         <>
-          <div className="toolbar">
+          <div className="workspace-grid">
+            <div className="workspace-main">
+              <div className="toolbar">
             <button onClick={() => fileInputRef.current?.click()}>Upload New Image</button>
 
             <div className="toolbar-cluster">
@@ -1096,12 +1133,15 @@ function App() {
                 height: editorHeight,
               }}
               onMouseDown={(e) => {
-                const isImageSurface =
-                  e.target === e.currentTarget || e.target instanceof HTMLImageElement
+                const isImageSurface = e.currentTarget.contains(e.target)
 
                 if (!isImageSurface) return
 
+                // Ignore clicks on toolbars
+                if (e.target.closest('.group-toolbar') || e.target.closest('.single-toolbar')) return
+
                 if (e.shiftKey) {
+                  e.preventDefault()
                   setSelectedCavityIndices([])
                   setIsPanning(true)
                   setPanStart({
@@ -1254,6 +1294,7 @@ function App() {
               {groupToolbarPosition && (
                 <div
                   className="group-toolbar"
+                  onClick={(e) => e.stopPropagation()}
                   style={{
                     left: groupToolbarPosition.left,
                     top: groupToolbarPosition.top,
@@ -1261,7 +1302,10 @@ function App() {
                 >
                   <button
                     className="group-toolbar__icon"
-                    onClick={() => toggleSelectedShape('round')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSelectedShape('round')
+                    }}
                     type="button"
                     title="Round cavities"
                   >
@@ -1269,7 +1313,10 @@ function App() {
                   </button>
                   <button
                     className="group-toolbar__icon"
-                    onClick={() => toggleSelectedShape('square')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSelectedShape('square')
+                    }}
                     type="button"
                     title="Square cavities"
                   >
@@ -1301,6 +1348,7 @@ function App() {
               {singleToolbarPosition && activeSingleCavity && (
                 <div
                   className="single-toolbar"
+                  onClick={(e) => e.stopPropagation()}
                   style={{
                     left: singleToolbarPosition.left,
                     top: singleToolbarPosition.top,
@@ -1308,7 +1356,10 @@ function App() {
                 >
                   <button
                     className={`group-toolbar__icon${activeSingleCavity.shape === 'round' ? ' is-active' : ''}`}
-                    onClick={() => updateSingleShape('round')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      updateSingleShape('round')
+                    }}
                     type="button"
                     title="Round cavity"
                   >
@@ -1316,7 +1367,10 @@ function App() {
                   </button>
                   <button
                     className={`group-toolbar__icon${activeSingleCavity.shape === 'square' ? ' is-active' : ''}`}
-                    onClick={() => updateSingleShape('square')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      updateSingleShape('square')
+                    }}
                     type="button"
                     title="Square cavity"
                   >
@@ -1324,7 +1378,10 @@ function App() {
                   </button>
                   <button
                     className={`group-toolbar__icon${activeSingleCavity.segmentCount === 1 ? ' is-active' : ''}`}
-                    onClick={() => updateSingleSegmentCount(1)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      updateSingleSegmentCount(1)
+                    }}
                     type="button"
                     title="Solid fill"
                   >
@@ -1332,7 +1389,10 @@ function App() {
                   </button>
                   <button
                     className={`group-toolbar__icon${activeSingleCavity.segmentCount === 2 ? ' is-active' : ''}`}
-                    onClick={() => updateSingleSegmentCount(2)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      updateSingleSegmentCount(2)
+                    }}
                     type="button"
                     title="Split in two"
                   >
@@ -1340,7 +1400,10 @@ function App() {
                   </button>
                   <button
                     className={`group-toolbar__icon${activeSingleCavity.segmentCount === 3 ? ' is-active' : ''}`}
-                    onClick={() => updateSingleSegmentCount(3)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      updateSingleSegmentCount(3)
+                    }}
                     type="button"
                     title="Split in three"
                   >
@@ -1427,28 +1490,29 @@ function App() {
               </div>
             </div>
           </div>
+        </div>
 
-          <section className="connector-panel">
-            <div className="connector-form">
-              <label className="connector-form__field">
+          <section className="epn-panel">
+            <div className="epn-form">
+              <label className="epn-form__field">
                 <span>Name</span>
                 <input
                   type="text"
-                  value={connectorInfo.name}
+                  value={epnInfo.name}
                   onChange={(e) =>
-                    setConnectorInfo((current) => ({ ...current, name: e.target.value }))
+                    setEpnInfo((current) => ({ ...current, name: e.target.value }))
                   }
-                  placeholder="Connector name"
+                  placeholder="EPN name"
                 />
               </label>
 
-              <label className="connector-form__field">
+              <label className="epn-form__field">
                 <span>Epn</span>
                 <input
                   type="text"
-                  value={connectorInfo.epn}
+                  value={epnInfo.epn}
                   onChange={(e) =>
-                    setConnectorInfo((current) => ({ ...current, epn: e.target.value }))
+                    setEpnInfo((current) => ({ ...current, epn: e.target.value }))
                   }
                   placeholder="Epn"
                 />
@@ -1533,7 +1597,8 @@ function App() {
               </table>
             </div>
           </section>
-        </>
+        </div>
+      </>
       ) : (
         <button
           type="button"
